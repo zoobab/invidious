@@ -74,9 +74,11 @@ LOCALES = {
   "is"    => load_locale("is"),
   "it"    => load_locale("it"),
   "ja"    => load_locale("ja"),
-  "nb_NO" => load_locale("nb_NO"),
+  "nb-NO" => load_locale("nb-NO"),
   "nl"    => load_locale("nl"),
+  "pt-BR" => load_locale("pt-BR"),
   "pl"    => load_locale("pl"),
+  "ro"    => load_locale("ro"),
   "ru"    => load_locale("ru"),
   "tr"    => load_locale("tr"),
   "uk"    => load_locale("uk"),
@@ -125,7 +127,7 @@ statistics = {
   "software" => SOFTWARE,
 }
 
-decrypt_function = [] of {name: String, value: Int32}
+decrypt_function = [] of {SigProc, Int32}
 spawn do
   update_decrypt_function do |function|
     decrypt_function = function
@@ -1114,7 +1116,7 @@ get "/api/manifest/dash/id/:id" do |env|
 
   # Since some implementations create playlists based on resolution regardless of different codecs,
   # we can opt to only add a source to a representation if it has a unique height within that representation
-  unique_res = env.params.query["unique_res"]? && (env.params.query["unique_res"] == "true" || env.params.query["unique_res"] == "1")
+  unique_res = env.params.query["unique_res"]?.try { |q| (q == "true" || q == "1").to_unsafe }
 
   begin
     video = fetch_video(id, region)
@@ -1126,7 +1128,7 @@ get "/api/manifest/dash/id/:id" do |env|
   end
 
   if dashmpd = video.player_response["streamingData"]?.try &.["dashManifestUrl"]?.try &.as_s
-    manifest = YT_POOL.client &.get(dashmpd).body
+    manifest = YT_POOL.client &.get(URI.parse(dashmpd).full_path).body
 
     manifest = manifest.gsub(/<BaseURL>[^<]+<\/BaseURL>/) do |baseurl|
       url = baseurl.lchop("<BaseURL>")
@@ -1151,7 +1153,7 @@ get "/api/manifest/dash/id/:id" do |env|
   end
 
   audio_streams = video.audio_streams(adaptive_fmts)
-  video_streams = video.video_streams(adaptive_fmts).sort_by { |stream| stream["fps"].to_i }.reverse
+  video_streams = video.video_streams(adaptive_fmts).sort_by { |stream| {stream["size"].split("x")[0].to_i, stream["fps"].to_i} }.reverse
 
   XML.build(indent: "  ", encoding: "UTF-8") do |xml|
     xml.element("MPD", "xmlns": "urn:mpeg:dash:schema:mpd:2011",
@@ -1189,9 +1191,7 @@ get "/api/manifest/dash/id/:id" do |env|
 
         {"video/mp4", "video/webm"}.each do |mime_type|
           mime_streams = video_streams.select { |stream| stream["type"].starts_with? mime_type }
-          if mime_streams.empty?
-            next
-          end
+          next if mime_streams.empty?
 
           heights = [] of Int32
           xml.element("AdaptationSet", id: i, mimeType: mime_type, startWithSAP: 1, subsegmentAlignment: true, scanType: "progressive") do

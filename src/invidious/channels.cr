@@ -215,7 +215,17 @@ def fetch_channel(ucid, db, pull_all_videos = true, locale = nil)
 
   url = produce_channel_videos_url(ucid, page, auto_generated: auto_generated)
   response = YT_POOL.client &.get(url)
-  json = JSON.parse(response.body)
+
+  begin
+    json = JSON.parse(response.body)
+  rescue ex
+    if response.body.includes?("To continue with your YouTube experience, please fill out the form below.") ||
+       response.body.includes?("https://www.google.com/sorry/index")
+      raise "Could not extract channel info. Instance is likely blocked."
+    end
+
+    raise "Could not extract JSON"
+  end
 
   if json["content_html"]? && !json["content_html"].as_s.empty?
     document = XML.parse_html(json["content_html"].as_s)
@@ -373,7 +383,7 @@ def fetch_channel(ucid, db, pull_all_videos = true, locale = nil)
 end
 
 def fetch_channel_playlists(ucid, author, auto_generated, continuation, sort_by)
-  if continuation
+  if continuation || auto_generated
     url = produce_channel_playlists_url(ucid, continuation, sort_by, auto_generated)
 
     response = YT_POOL.client &.get(url)
@@ -392,13 +402,6 @@ def fetch_channel_playlists(ucid, author, auto_generated, continuation, sort_by)
 
     html = XML.parse_html(json["content_html"].as_s)
     nodeset = html.xpath_nodes(%q(//li[contains(@class, "feed-item-container")]))
-  elsif auto_generated
-    url = "/channel/#{ucid}"
-
-    response = YT_POOL.client &.get(url)
-    html = XML.parse_html(response.body)
-
-    nodeset = html.xpath_nodes(%q(//ul[@id="browse-items-primary"]/li[contains(@class, "feed-item-container")]))
   else
     url = "/channel/#{ucid}/playlists?disable_polymer=1&flow=list&view=1"
 
@@ -494,10 +497,10 @@ def produce_channel_playlists_url(ucid, cursor, sort = "newest", auto_generated 
     },
   }
 
-  if !auto_generated
-    cursor = Base64.urlsafe_encode(cursor, false)
+  if cursor
+    cursor = Base64.urlsafe_encode(cursor, false) if !auto_generated
+    object["80226972:embedded"]["3:base64"].as(Hash)["15:string"] = cursor
   end
-  object["80226972:embedded"]["3:base64"].as(Hash)["15:string"] = cursor
 
   if auto_generated
     object["80226972:embedded"]["3:base64"].as(Hash)["4:varint"] = 0x32_i64
@@ -530,8 +533,17 @@ def extract_channel_playlists_cursor(url, auto_generated)
     .try { |i| Base64.decode(i) }
     .try { |i| IO::Memory.new(i) }
     .try { |i| Protodec::Any.parse(i) }
-    .try { |i| i["80226972:0:embedded"]["3:1:base64"].as_h.find { |k, v| k.starts_with?("15:") } }
-    .try &.[1].as_s || ""
+    .try { |i| i["80226972:0:embedded"]["3:1:base64"].as_h.find { |k, v| k.starts_with? "15:" } }
+    .try &.[1]
+
+  if cursor.try &.as_h?
+    cursor = cursor.try { |i| Protodec::Any.cast_json(i.as_h) }
+      .try { |i| Protodec::Any.from_json(i) }
+      .try { |i| Base64.urlsafe_encode(i) }
+      .try { |i| URI.encode_www_form(i) } || ""
+  else
+    cursor = cursor.try &.as_s || ""
+  end
 
   if !auto_generated
     cursor = URI.decode_www_form(cursor)
@@ -797,7 +809,7 @@ def produce_channel_community_continuation(ucid, cursor)
   object = {
     "80226972:embedded" => {
       "2:string" => ucid,
-      "3:string" => cursor,
+      "3:string" => cursor || "",
     },
   }
 
