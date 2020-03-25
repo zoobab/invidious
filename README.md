@@ -115,6 +115,9 @@ $ psql invidious kemal < /home/invidious/invidious/config/sql/users.sql
 $ psql invidious kemal < /home/invidious/invidious/config/sql/session_ids.sql
 $ psql invidious kemal < /home/invidious/invidious/config/sql/nonces.sql
 $ psql invidious kemal < /home/invidious/invidious/config/sql/annotations.sql
+$ psql invidious kemal < /home/invidious/invidious/config/sql/privacy.sql
+$ psql invidious kemal < /home/invidious/invidious/config/sql/playlists.sql
+$ psql invidious kemal < /home/invidious/invidious/config/sql/playlist_videos.sql
 $ exit
 ```
 
@@ -138,6 +141,20 @@ $ sudo systemctl enable invidious.service
 $ sudo systemctl start invidious.service
 ```
 
+#### Logrotate
+
+```bash
+$ sudo echo "/home/invidious/invidious/invidious.log {
+rotate 4
+weekly
+notifempty
+missingok
+compress
+minsize 1048576
+}" | tee /etc/logrotate.d/invidious.logrotate
+$ sudo chmod 0644 /etc/logrotate.d/invidious.logrotate
+```
+
 ### OSX:
 
 ```bash
@@ -158,6 +175,9 @@ $ psql invidious kemal < config/sql/users.sql
 $ psql invidious kemal < config/sql/session_ids.sql
 $ psql invidious kemal < config/sql/nonces.sql
 $ psql invidious kemal < config/sql/annotations.sql
+$ psql invidious kemal < config/sql/privacy.sql
+$ psql invidious kemal < config/sql/playlists.sql
+$ psql invidious kemal < config/sql/playlist_videos.sql
 
 # Setup Invidious
 $ shards update && shards install
@@ -209,6 +229,7 @@ $ ./sentry
 - [CloudTube](https://cadence.moe/cloudtube/subscriptions): A JS-rich alternate YouTube player
 - [PeerTubeify](https://gitlab.com/Ealhad/peertubeify): On YouTube, displays a link to the same video on PeerTube, if it exists.
 - [MusicPiped](https://github.com/deep-gaurav/MusicPiped): A materialistic music player that streams music from YouTube.
+- [LapisTube](https://github.com/blubbll/lapis-tube): A fancy and advanced (experimental) YouTube frontend. Combined streams & custom YT features.
 
 ## Contributing
 

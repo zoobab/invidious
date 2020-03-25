@@ -28,16 +28,18 @@ require "protodec/utils"
 require "./invidious/helpers/*"
 require "./invidious/*"
 
-CONFIG   = Config.from_yaml(File.read("config/config.yml"))
-HMAC_KEY = CONFIG.hmac_key || Random::Secure.hex(32)
+ENV_CONFIG_NAME = "INVIDIOUS_CONFIG"
+
+CONFIG_STR = ENV.has_key?(ENV_CONFIG_NAME) ? ENV.fetch(ENV_CONFIG_NAME) : File.read("config/config.yml")
+CONFIG     = Config.from_yaml(CONFIG_STR)
+HMAC_KEY   = CONFIG.hmac_key || Random::Secure.hex(32)
 
 ARCHIVE_URL     = URI.parse("https://archive.org")
 LOGIN_URL       = URI.parse("https://accounts.google.com")
 PUBSUB_URL      = URI.parse("https://pubsubhubbub.appspot.com")
 REDDIT_URL      = URI.parse("https://www.reddit.com")
-TEXTCAPTCHA_URL = URI.parse("http://textcaptcha.com")
+TEXTCAPTCHA_URL = URI.parse("https://textcaptcha.com")
 YT_URL          = URI.parse("https://www.youtube.com")
-YT_IMG_URL      = URI.parse("https://i.ytimg.com")
 
 CHARS_SAFE         = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
 TEST_IDS           = {"AgbeGFYluEA", "BaW_jenozKc", "a9LDPn-MO4I", "ddFvjfvPnqk", "iqKdEhx-dD4"}
@@ -47,7 +49,7 @@ REQUEST_HEADERS_WHITELIST  = {"accept", "accept-encoding", "cache-control", "con
 RESPONSE_HEADERS_BLACKLIST = {"access-control-allow-origin", "alt-svc", "server"}
 HTTP_CHUNK_SIZE            = 10485760 # ~10MB
 
-CURRENT_BRANCH  = {{ "#{`git branch | sed -n '/\* /s///p'`.strip}" }}
+CURRENT_BRANCH  = {{ "#{`git branch | sed -n '/* /s///p'`.strip}" }}
 CURRENT_COMMIT  = {{ "#{`git rev-list HEAD --max-count=1 --abbrev-commit`.strip}" }}
 CURRENT_VERSION = {{ "#{`git describe --tags --abbrev=0`.strip}" }}
 
@@ -86,8 +88,7 @@ LOCALES = {
   "zh-TW" => load_locale("zh-TW"),
 }
 
-YT_POOL     = QUICPool.new(YT_URL, capacity: CONFIG.pool_size, timeout: 0.05)
-YT_IMG_POOL = QUICPool.new(YT_IMG_URL, capacity: CONFIG.pool_size, timeout: 0.05)
+YT_POOL = QUICPool.new(YT_URL, capacity: CONFIG.pool_size, timeout: 0.1)
 
 config = CONFIG
 logger = Invidious::LogHandler.new
@@ -1453,8 +1454,8 @@ get "/videoplayback" do |env|
   end
 
   client = make_client(URI.parse(host), region)
-
   response = HTTP::Client::Response.new(500)
+  error = ""
   5.times do
     begin
       response = client.head(url, headers)
@@ -1479,12 +1480,14 @@ get "/videoplayback" do |env|
       host = "https://r#{fvip}---#{mn}.googlevideo.com"
       client = make_client(URI.parse(host), region)
     rescue ex
+      error = ex.message
     end
   end
 
   if response.status_code >= 400
     env.response.status_code = response.status_code
-    next
+    env.response.content_type = "text/plain"
+    next error
   end
 
   if url.includes? "&file=seg.ts"
@@ -1615,11 +1618,10 @@ get "/videoplayback" do |env|
 end
 
 get "/ggpht/*" do |env|
-  host = "https://yt3.ggpht.com"
-  client = make_client(URI.parse(host))
   url = env.request.path.lchop("/ggpht")
 
   headers = HTTP::Headers.new
+  headers[":authority"] = "yt3.ggpht.com"
   REQUEST_HEADERS_WHITELIST.each do |header|
     if env.request.headers[header]?
       headers[header] = env.request.headers[header]
@@ -1627,7 +1629,7 @@ get "/ggpht/*" do |env|
   end
 
   begin
-    client.get(url, headers) do |response|
+    YT_POOL.client &.get(url, headers) do |response|
       env.response.status_code = response.status_code
       response.headers.each do |key, value|
         if !RESPONSE_HEADERS_BLACKLIST.includes?(key.downcase)
@@ -1660,16 +1662,16 @@ get "/sb/:id/:storyboard/:index" do |env|
   storyboard = env.params.url["storyboard"]
   index = env.params.url["index"]
 
-  if storyboard.starts_with? "storyboard_live"
-    host = "https://i.ytimg.com"
-  else
-    host = "https://i9.ytimg.com"
-  end
-  client = make_client(URI.parse(host))
-
   url = "/sb/#{id}/#{storyboard}/#{index}?#{env.params.query}"
 
   headers = HTTP::Headers.new
+
+  if storyboard.starts_with? "storyboard_live"
+    headers[":authority"] = "i.ytimg.com"
+  else
+    headers[":authority"] = "i9.ytimg.com"
+  end
+
   REQUEST_HEADERS_WHITELIST.each do |header|
     if env.request.headers[header]?
       headers[header] = env.request.headers[header]
@@ -1677,7 +1679,7 @@ get "/sb/:id/:storyboard/:index" do |env|
   end
 
   begin
-    client.get(url, headers) do |response|
+    YT_POOL.client &.get(url, headers) do |response|
       env.response.status_code = response.status_code
       response.headers.each do |key, value|
         if !RESPONSE_HEADERS_BLACKLIST.includes?(key.downcase)
@@ -1685,6 +1687,7 @@ get "/sb/:id/:storyboard/:index" do |env|
         end
       end
 
+      env.response.headers["Connection"] = "close"
       env.response.headers["Access-Control-Allow-Origin"] = "*"
 
       if response.status_code >= 300
@@ -1702,11 +1705,10 @@ get "/s_p/:id/:name" do |env|
   id = env.params.url["id"]
   name = env.params.url["name"]
 
-  host = "https://i9.ytimg.com"
-  client = make_client(URI.parse(host))
   url = env.request.resource
 
   headers = HTTP::Headers.new
+  headers[":authority"] = "i9.ytimg.com"
   REQUEST_HEADERS_WHITELIST.each do |header|
     if env.request.headers[header]?
       headers[header] = env.request.headers[header]
@@ -1714,7 +1716,7 @@ get "/s_p/:id/:name" do |env|
   end
 
   begin
-    client.get(url, headers) do |response|
+    YT_POOL.client &.get(url, headers) do |response|
       env.response.status_code = response.status_code
       response.headers.each do |key, value|
         if !RESPONSE_HEADERS_BLACKLIST.includes?(key.downcase)
@@ -1769,9 +1771,12 @@ get "/vi/:id/:name" do |env|
   id = env.params.url["id"]
   name = env.params.url["name"]
 
+  headers = HTTP::Headers.new
+  headers[":authority"] = "i.ytimg.com"
+
   if name == "maxres.jpg"
     build_thumbnails(id, config, Kemal.config).each do |thumb|
-      if YT_IMG_POOL.client &.head("/vi/#{id}/#{thumb[:url]}.jpg").status_code == 200
+      if YT_POOL.client &.head("/vi/#{id}/#{thumb[:url]}.jpg", headers).status_code == 200
         name = thumb[:url] + ".jpg"
         break
       end
@@ -1779,7 +1784,6 @@ get "/vi/:id/:name" do |env|
   end
   url = "/vi/#{id}/#{name}"
 
-  headers = HTTP::Headers.new
   REQUEST_HEADERS_WHITELIST.each do |header|
     if env.request.headers[header]?
       headers[header] = env.request.headers[header]
@@ -1787,7 +1791,7 @@ get "/vi/:id/:name" do |env|
   end
 
   begin
-    YT_IMG_POOL.client &.get(url, headers) do |response|
+    YT_POOL.client &.get(url, headers) do |response|
       env.response.status_code = response.status_code
       response.headers.each do |key, value|
         if !RESPONSE_HEADERS_BLACKLIST.includes?(key.downcase)
