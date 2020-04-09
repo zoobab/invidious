@@ -78,10 +78,11 @@ LOCALES = {
   "ja"    => load_locale("ja"),
   "nb-NO" => load_locale("nb-NO"),
   "nl"    => load_locale("nl"),
-  "pt-BR" => load_locale("pt-BR"),
   "pl"    => load_locale("pl"),
+  "pt-BR" => load_locale("pt-BR"),
   "ro"    => load_locale("ro"),
   "ru"    => load_locale("ru"),
+  "sv"    => load_locale("sv-SE"),
   "tr"    => load_locale("tr"),
   "uk"    => load_locale("uk"),
   "zh-CN" => load_locale("zh-CN"),
@@ -521,7 +522,7 @@ get "/api/v1/annotations/:id" do |env|
     end
 
     annotations = response.body
-  when "youtube"
+  else # "youtube"
     response = YT_POOL.client &.get("/annotations_invideo?video_id=#{id}")
 
     if response.status_code != 200
