@@ -73,6 +73,7 @@ LOCALES = {
   "es"    => load_locale("es"),
   "eu"    => load_locale("eu"),
   "fr"    => load_locale("fr"),
+  "hu"    => load_locale("hu-HU"),
   "is"    => load_locale("is"),
   "it"    => load_locale("it"),
   "ja"    => load_locale("ja"),
@@ -80,6 +81,7 @@ LOCALES = {
   "nl"    => load_locale("nl"),
   "pl"    => load_locale("pl"),
   "pt-BR" => load_locale("pt-BR"),
+  "pt-PT" => load_locale("pt-PT"),
   "ro"    => load_locale("ro"),
   "ru"    => load_locale("ru"),
   "sv"    => load_locale("sv-SE"),
@@ -667,7 +669,7 @@ get "/api/v1/channels/:ucid" do |env|
 
           qualities.each do |quality|
             json.object do
-              json.field "url", channel.author_thumbnail.gsub(/=\d+/, "=s#{quality}")
+              json.field "url", channel.author_thumbnail.gsub(/=s\d+/, "=s#{quality}")
               json.field "width", quality
               json.field "height", quality
             end
@@ -1621,8 +1623,7 @@ end
 get "/ggpht/*" do |env|
   url = env.request.path.lchop("/ggpht")
 
-  headers = HTTP::Headers.new
-  headers[":authority"] = "yt3.ggpht.com"
+  headers = HTTP::Headers{":authority" => "yt3.ggpht.com"}
   REQUEST_HEADERS_WHITELIST.each do |header|
     if env.request.headers[header]?
       headers[header] = env.request.headers[header]
@@ -1708,8 +1709,7 @@ get "/s_p/:id/:name" do |env|
 
   url = env.request.resource
 
-  headers = HTTP::Headers.new
-  headers[":authority"] = "i9.ytimg.com"
+  headers = HTTP::Headers{":authority" => "i9.ytimg.com"}
   REQUEST_HEADERS_WHITELIST.each do |header|
     if env.request.headers[header]?
       headers[header] = env.request.headers[header]
@@ -1772,8 +1772,7 @@ get "/vi/:id/:name" do |env|
   id = env.params.url["id"]
   name = env.params.url["name"]
 
-  headers = HTTP::Headers.new
-  headers[":authority"] = "i.ytimg.com"
+  headers = HTTP::Headers{":authority" => "i.ytimg.com"}
 
   if name == "maxres.jpg"
     build_thumbnails(id, config, Kemal.config).each do |thumb|

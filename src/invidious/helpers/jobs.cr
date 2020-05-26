@@ -259,10 +259,7 @@ def bypass_captcha(captcha_key, logger)
             },
           }.to_json).body)
 
-          if response["error"]?
-            raise response["error"].as_s
-          end
-
+          raise response["error"].as_s if response["error"]?
           task_id = response["taskId"].as_i
 
           loop do
@@ -286,8 +283,8 @@ def bypass_captcha(captcha_key, logger)
           yield response.cookies.select { |cookie| cookie.name != "PREF" }
         elsif response.headers["Location"]?.try &.includes?("/sorry/index")
           location = response.headers["Location"].try { |u| URI.parse(u) }
-          client = QUIC::Client.new(location.host.not_nil!)
-          response = client.get(location.full_path)
+          headers = HTTP::Headers{":authority" => location.host.not_nil!}
+          response = YT_POOL.client &.get(location.full_path, headers)
 
           html = XML.parse_html(response.body)
           form = html.xpath_node(%(//form[@action="index"])).not_nil!
@@ -298,7 +295,9 @@ def bypass_captcha(captcha_key, logger)
             inputs[node["name"]] = node["value"]
           end
 
-          response = JSON.parse(HTTP::Client.post("https://api.anti-captcha.com/createTask", body: {
+          captcha_client = HTTPClient.new(URI.parse("https://api.anti-captcha.com"))
+          captcha_client.family = CONFIG.force_resolve || Socket::Family::INET
+          response = JSON.parse(captcha_client.post("/createTask", body: {
             "clientKey" => CONFIG.captcha_key,
             "task"      => {
               "type"       => "NoCaptchaTaskProxyless",
@@ -307,16 +306,13 @@ def bypass_captcha(captcha_key, logger)
             },
           }.to_json).body)
 
-          if response["error"]?
-            raise response["error"].as_s
-          end
-
+          raise response["error"].as_s if response["error"]?
           task_id = response["taskId"].as_i
 
           loop do
             sleep 10.seconds
 
-            response = JSON.parse(HTTP::Client.post("https://api.anti-captcha.com/getTaskResult", body: {
+            response = JSON.parse(captcha_client.post("/getTaskResult", body: {
               "clientKey" => CONFIG.captcha_key,
               "taskId"    => task_id,
             }.to_json).body)
@@ -329,9 +325,11 @@ def bypass_captcha(captcha_key, logger)
           end
 
           inputs["g-recaptcha-response"] = response["solution"]["gRecaptchaResponse"].as_s
-          client.close
-          client = QUIC::Client.new("www.google.com")
-          response = client.post(location.full_path, form: inputs)
+          headers["content-type"] = "application/x-www-form-urlencoded"
+          headers["origin"] = "https://www.google.com"
+          headers["user-agent"] = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/83.0.4103.61 Safari/537.36"
+
+          response = YT_POOL.client &.post("/sorry/index", headers: headers, form: inputs)
           headers = HTTP::Headers{
             "Cookie" => URI.parse(response.headers["location"]).query_params["google_abuse"].split(";")[0],
           }
